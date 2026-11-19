@@ -1,0 +1,1431 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>SHADOW · Controle de robô seguidor de linha</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Paleta Inspirada no Google Gemini */
+    --bg-main:#131314; 
+    --panel:#1e1f20; 
+    --panel-sub:#282a2c; 
+    --border:rgba(255, 255, 255, 0.08);
+    --border-focus:rgba(255, 255, 255, 0.2);
+    
+    --text-primary:#e3e2e6; 
+    --text-secondary:#c4c6d0; 
+    --text-dim:#8e919e;
+    
+    /* Destaques e Degradê Gemini */
+    --gemini-gradient: linear-gradient(135deg, #ff9a76 0%, #ff4d4d 50%, #c2185b 100%);
+    --gemini-blue: #ff6b5b;
+    --screen:#0b0c0e;
+    
+    --led-on:#6dd58c; 
+    --led-off:#44474e; 
+    --rec:#f2b8b5;
+    
+    --disp:'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --mono:'Space Mono', monospace;
+  }
+  
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg-main);
+    min-height:100vh; color:var(--text-primary); font-family:var(--disp);
+    -webkit-tap-highlight-color:transparent; padding:32px 16px 48px;
+  }
+
+  /* ── Layout com Imagens Laterais ── */
+  .page-container{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(0,640px) minmax(0,1fr);
+    gap:28px; align-items:stretch;
+    max-width:1500px; margin:0 auto;
+  }
+  .side-img{
+    width:100%; height:100%; min-height:300px; max-height:900px;
+    border-radius:20px; border:1px solid var(--border);
+    box-shadow:0 12px 32px rgba(0,0,0,.4);
+    object-fit:cover; background:var(--panel);
+  }
+  .side-img.broken{visibility:hidden}
+  @media (max-width:1000px){
+    .page-container{grid-template-columns:minmax(0,640px); justify-content:center}
+    .side-img{display:none}
+  }
+
+  /* ── Painel Principal ── */
+  .unit{
+    width:100%; min-width:0; position:relative; border-radius:24px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+    padding:24px 24px 28px;
+  }
+
+  .groove{height:1px; margin:20px 0; background:var(--border);}
+
+  /* ── Nameplate ── */
+  .plate{display:flex; align-items:center; gap:14px; padding:0 4px}
+  .plate .splane{flex:0 0 auto;}
+  .id{display:flex; flex-direction:column; line-height:1.1}
+  .model{
+    font-weight:700; font-size:22px; letter-spacing:-0.02em;
+    background: var(--gemini-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .desc{font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim); margin-top:2px; font-weight:500;}
+  .conn{margin-left:auto; display:flex; align-items:center; gap:10px}
+  .led{width:8px; height:8px; border-radius:50%; background:var(--led-off); transition: 0.3s;}
+  .led.on{background:var(--led-on); box-shadow:0 0 12px var(--led-on)}
+  .led.rec{background:var(--rec); box-shadow:0 0 12px var(--rec)}
+  
+  /* Botões no formato Pill */
+  button.panel{
+    font-family:var(--disp); font-weight:600; font-size:12px; color:var(--text-primary); cursor:pointer;
+    background:var(--panel-sub); border:1px solid var(--border); border-radius:100px;
+    padding:10px 18px; transition: all 0.2s ease;
+  }
+  button.panel:hover{background:#333538; border-color: var(--border-focus);}
+  button.panel:active{transform:scale(0.97);}
+  button.panel:focus-visible{outline:2px solid var(--gemini-blue); outline-offset:2px}
+  button.panel:disabled{opacity:.3; cursor:default}
+
+  /* ── CRT / Visor Osciloscópio ── */
+  .bezel{margin-top:20px; padding:4px; border-radius:16px;
+    background:#171819; border: 1px solid var(--border);}
+  .crt{position:relative; border-radius:12px; overflow:hidden; background:var(--screen);
+    aspect-ratio:16/9;}
+  .crt canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+  .crt .vignette{position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 120% at 50% 50%, transparent 75%, rgba(0,0,0,.6));}
+  .osd{position:absolute; font-family:var(--mono); font-size:11px; color:var(--gemini-blue); pointer-events:none}
+  .osd.ch1{top:12px; left:14px} .osd.ch2{top:12px; left:95px}
+  .osd.scale{top:12px; right:14px; color:#ffb4a2}
+  .osd.tb{bottom:12px; right:14px; color:#ffb4a2}
+  .osd.tm{bottom:12px; left:14px; color:var(--led-on); font-weight:700}
+  .osd.idle{top:50%; left:50%; transform:translate(-50%,-50%); color:#3c4043; letter-spacing:.2em; font-family:var(--disp); font-weight:600}
+
+  /* ── Cartões de Leitura ── */
+  .reads{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:16px;}
+  .cell{background:var(--panel-sub); padding:12px 14px; border-radius:16px; border:1px solid var(--border);}
+  .cell .lab{font-size:10px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim)}
+  .cell .val{font-family:var(--mono); font-weight:700; font-size:18px; margin-top:4px; color:var(--text-primary);
+    font-variant-numeric:tabular-nums;}
+  .cell.e .val{color:var(--gemini-blue)} .cell.u .val{color:#ffb4a2}
+
+  /* ── Cabeçalhos de Secção ── */
+  .sec-h{display:flex; align-items:center; gap:10px; margin:12px 4px 10px}
+  .sec-h b{font-weight:600; font-size:13px; letter-spacing:.02em; color:var(--text-primary)}
+  .sec-h span{font-size:11px; color:var(--text-dim)}
+  .sec-h .line{flex:1; height:1px; background:var(--border)}
+
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media(max-width:540px){ .cols{grid-template-columns:1fr} }
+
+  .mod{background:var(--panel-sub); border:1px solid var(--border); border-radius:18px; padding:16px;}
+
+  /* ── Perfis de Controle ── */
+  .prof-grid{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-bottom:10px;}
+  .profb{
+    background:#131314; border:1px solid var(--border); border-radius:10px;
+    padding:8px 4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px;
+    transition:all 0.2s ease; color:var(--text-dim); font-family:var(--disp);
+  }
+  .profb:hover{border-color:var(--border-focus); color:var(--text-secondary);}
+  .profb.on{
+    background:rgba(255, 107, 91, 0.12);
+    border-color:var(--gemini-blue);
+    color:var(--text-primary);
+    box-shadow:0 0 12px rgba(255, 107, 91, 0.15);
+  }
+  .profb .pnum{font-family:var(--mono); font-size:10px; font-weight:700; color:var(--gemini-blue);}
+  .profb .pname{font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; padding:0 3px;}
+
+  .prof-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    background:#131314; border:1px solid var(--border); border-radius:10px; padding:6px 10px;
+  }
+  .prof-info{display:flex; align-items:center; gap:6px; min-width:0; flex:1;}
+  .prof-title{
+    font-size:11px; font-weight:600; color:var(--text-primary);
+    background:transparent; border:0; border-bottom:1px dashed transparent;
+    font-family:var(--disp); width:100%; min-width:0; padding:2px 0;
+  }
+  .prof-title:focus{outline:none; border-bottom-color:var(--gemini-blue);}
+  .prof-badge{
+    font-family:var(--mono); font-size:9px; color:#ffb4a2; background:rgba(255,107,91,0.16);
+    padding:2px 6px; border-radius:6px; white-space:nowrap; display:none;
+  }
+  .prof-badge.show{display:inline-block;}
+  .prof-acts{display:flex; align-items:center; gap:5px; flex-shrink:0;}
+  .pact{
+    font-family:var(--disp); font-weight:600; font-size:10px;
+    padding:5px 9px; border-radius:7px; border:1px solid var(--border);
+    background:var(--panel-sub); color:var(--text-secondary); cursor:pointer; transition:0.15s;
+  }
+  .pact:hover{border-color:var(--border-focus); color:var(--text-primary);}
+  .pact.save.dirty{
+    background:var(--gemini-gradient); color:#0b0c0e; border-color:transparent; font-weight:700;
+  }
+
+  /* ── Cronômetro ── */
+  .sw-box{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:#131314; border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px; margin-bottom:12px; transition:border-color 0.25s ease;
+  }
+  .sw-box.running{border-color:rgba(109, 213, 140, 0.45); box-shadow:0 0 16px rgba(109, 213, 140, 0.08);}
+  .sw-box.stopped{border-color:rgba(255, 107, 91, 0.35);}
+  .sw-meta{display:flex; flex-direction:column; gap:3px;}
+  .sw-lab{font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim);}
+  .sw-stat{
+    font-family:var(--mono); font-size:10px; font-weight:700; color:var(--text-dim);
+    display:inline-flex; align-items:center; gap:5px;
+  }
+  .sw-stat::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--led-off);}
+  .sw-box.running .sw-stat{color:var(--led-on);}
+  .sw-box.running .sw-stat::before{background:var(--led-on); box-shadow:0 0 8px var(--led-on);}
+  .sw-box.stopped .sw-stat{color:#ffb4a2;}
+  .sw-box.stopped .sw-stat::before{background:var(--gemini-blue);}
+  .sw-right{display:flex; align-items:center; gap:8px;}
+  .sw-val{
+    font-family:var(--mono); font-weight:700; font-size:21px; letter-spacing:-0.02em;
+    color:var(--text-primary); font-variant-numeric:tabular-nums;
+  }
+  .sw-box.running .sw-val{color:var(--led-on);}
+  .sw-rst{
+    background:var(--panel-sub); border:1px solid var(--border); color:var(--text-secondary);
+    border-radius:8px; width:28px; height:28px; display:grid; place-items:center;
+    cursor:pointer; font-size:13px; transition:0.15s;
+  }
+  .sw-rst:hover{border-color:var(--border-focus); color:var(--text-primary);}
+  .sw-rst:disabled{opacity:.3; cursor:default;}
+
+  /* Toggle Rocker */
+  .rocker{display:flex; border-radius:100px; overflow:hidden; margin-bottom:10px; background:#131314; padding:3px; gap:4px; border: 1px solid var(--border);}
+  .rocker button{flex:1; font-family:var(--disp); font-weight:600; font-size:12px; padding:10px 8px; cursor:pointer; color:var(--text-dim); border:0; border-radius:100px; background:transparent; transition:.2s}
+  .rocker button:focus-visible{outline:2px solid var(--gemini-blue)}
+  #bStop.on{color:#fff; background:#b3261e;}
+  #bGo.on{color:#00391c; background:var(--led-on); font-weight:700;}
+  .mot-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .mot-actions .panel{width:100%; padding:10px 8px; text-align:center;}
+  .panel.man-btn.on{background:var(--gemini-gradient); color:#0b0c0e; border-color:transparent; font-weight:700;}
+
+  /* Fórmula */
+  .formula{font-family:var(--mono); font-size:12px; color:var(--text-secondary); text-align:center; padding:6px 0 12px;}
+  .formula i{font-family:var(--disp); font-style:italic; color:var(--text-primary)}
+  .formula .frac{display:inline-flex; flex-direction:column; vertical-align:middle; text-align:center; margin:0 1px}
+  .formula .frac span{line-height:1}
+  .formula .frac .d{border-top:1px solid var(--text-dim); padding-top:1px}
+
+  /* Sliders Modernos */
+  .gain{display:grid; grid-template-columns:38px 1fr 60px; align-items:center; gap:10px; padding:8px 0;}
+  .gain+.gain{border-top:1px solid var(--border)}
+  .gain label{font-family:var(--mono); font-weight:700; font-size:12px; color:var(--text-secondary)}
+  .gain label sub{font-weight:400; font-size:9px}
+  input[type=range]{-webkit-appearance:none; appearance:none; height:6px; border-radius:100px; outline:none;
+    background-color:#131314; background-image:var(--gemini-gradient);
+    background-size:var(--fill,40%) 100%; background-repeat:no-repeat;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:#ffffff; cursor:pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); transition: transform 0.15s ease;}
+  input[type=range]::-webkit-slider-thumb:hover{transform: scale(1.2);}
+  input[type=range]::-moz-range-thumb{width:16px; height:16px; border-radius:50%; background:#ffffff; border:0; cursor:pointer}
+  
+  input.num{width:100%; background:#131314; border:1px solid var(--border); color:var(--gemini-blue);
+    font-family:var(--mono); font-weight:700; font-size:12px; text-align:right; padding:6px 8px; border-radius:8px;
+    -moz-appearance:textfield}
+  input.num::-webkit-outer-spin-button,input.num::-webkit-inner-spin-button{-webkit-appearance:none}
+  input.num:focus-visible{outline:2px solid var(--gemini-blue); outline-offset:1px}
+
+  /* Botoes de Onda */
+  .wave{display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px}
+  .wave button{font-family:var(--disp); font-weight:600; font-size:11px;
+    color:var(--text-dim); background:#131314; border:1px solid var(--border);
+    border-radius:10px; padding:8px 4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; transition: 0.2s;}
+  .wave button svg{width:22px; height:12px}
+  .wave button svg polyline{fill:none; stroke:var(--text-dim); stroke-width:1.4}
+  .wave button.on{color:var(--text-primary); background:#282a2c; border-color:var(--gemini-blue)}
+  .wave button.on svg path,.wave button.on svg polyline{stroke:var(--gemini-blue)}
+  
+  .gen-opt{display:none; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
+  .gen-opt label{display:flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:var(--text-dim)}
+  .gen-opt input.s{width:54px; background:#131314; border:1px solid var(--border); color:var(--gemini-blue);
+    font-family:var(--mono); font-weight:700; font-size:12px; text-align:right; padding:5px 6px; border-radius:6px}
+  .gen-opt input[type=checkbox]{width:15px; height:15px; accent-color:var(--gemini-blue)}
+  
+  .durrow{display:flex; align-items:center; gap:8px; margin-bottom:12px}
+  .durrow .k{font-size:11px; font-weight:500; color:var(--text-dim)}
+  .durb{font-family:var(--mono); font-weight:700; font-size:11px; color:var(--text-dim);
+    background:#131314; border:1px solid var(--border); border-radius:8px; padding:5px 10px; cursor:pointer; transition:0.2s}
+  .durb.on{color:var(--gemini-blue); border-color:var(--gemini-blue); background:#282a2c}
+  
+  #rec{width:100%; font-family:var(--disp); font-weight:600; font-size:12px; color:var(--text-primary); cursor:pointer; padding:12px; border-radius:100px;
+    background:var(--gemini-gradient); border:0; color:#0b0c0e; font-weight:700; transition: opacity 0.2s;}
+  #rec:hover{opacity:0.9}
+  #rec.armed{background:#f2b8b5; color:#601410}
+  #rec:active{transform:scale(0.98)} #rec:disabled{opacity:.2; cursor:default; background:var(--panel-sub); color:var(--text-dim)}
+  
+  .note{font-family:var(--disp); font-size:11px; color:var(--text-dim); margin-top:8px; line-height:1.4}
+
+  details{margin-top:14px}
+  summary{list-style:none; cursor:pointer; font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--text-dim); padding:6px 2px}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ "; color:var(--text-dim)} details[open] summary::before{content:"▾ "}
+  .chkrow{display:flex; align-items:center; gap:10px; padding:10px 2px 2px; font-family:var(--disp); font-size:12px; color:var(--text-secondary)}
+  .chkrow input{width:16px; height:16px; accent-color:var(--gemini-blue)}
+
+  .warn{display:none; font-family:var(--disp); font-size:12px; color:#f2b8b5; line-height:1.5;
+    background:#3b1d1d; border:1px solid #8c1d18; border-radius:12px; padding:12px 14px; margin-top:14px}
+  .foot{text-align:center; font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:20px}
+
+  /* ── Telinha Flutuante de Controle Manual (Joystick Analógico + PS5 DualSense) ── */
+  .man-sheet{
+    display:none; position:fixed; bottom:18px; right:18px; width:320px;
+    background:rgba(30, 31, 32, 0.97); backdrop-filter:blur(12px);
+    border:1px solid rgba(255, 107, 91, 0.45); border-radius:24px;
+    padding:16px 18px 18px; box-shadow:0 20px 48px rgba(0,0,0,0.75);
+    z-index:999; flex-direction:column; gap:12px;
+  }
+  .man-sheet.open{display:flex;}
+  @media(max-width:640px){
+    .man-sheet{left:12px; right:12px; bottom:12px; width:auto;}
+  }
+  .man-head{
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    padding-bottom:8px; border-bottom:1px solid var(--border);
+  }
+  .man-title{
+    font-weight:700; font-size:12px; letter-spacing:.05em; text-transform:uppercase;
+    background:var(--gemini-gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .man-badges{display:flex; align-items:center; gap:5px;}
+  .man-pill{
+    font-family:var(--mono); font-size:9px; font-weight:700; padding:3px 7px;
+    border-radius:100px; background:rgba(242, 184, 181, 0.14); color:var(--rec);
+    border:1px solid rgba(242, 184, 181, 0.35); white-space:nowrap;
+  }
+  .man-pill.on{
+    background:rgba(109, 213, 140, 0.16); color:var(--led-on);
+    border-color:rgba(109, 213, 140, 0.45);
+  }
+  .man-pill.ps5{
+    display:none; background:rgba(88, 166, 255, 0.16); color:#79c0ff;
+    border-color:rgba(88, 166, 255, 0.45);
+  }
+  .man-pill.ps5.connected{display:inline-block;}
+  .man-close{
+    background:#131314; border:1px solid var(--border); color:var(--text-secondary);
+    width:26px; height:26px; border-radius:50%; display:grid; place-items:center;
+    cursor:pointer; font-size:12px; flex-shrink:0;
+  }
+  .man-close:hover{border-color:var(--border-focus); color:var(--text-primary);}
+  .man-spd{
+    display:grid; grid-template-columns:54px 1fr 44px; align-items:center; gap:8px;
+  }
+  .man-spd span{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text-secondary);}
+  .man-spd b{font-family:var(--mono); font-size:12px; color:var(--gemini-blue); text-align:right;}
+
+  /* Joystick Analógico Touch / Visualizador PS5 */
+  .joy-wrap{
+    display:flex; flex-direction:column; align-items:center; gap:6px; padding:2px 0;
+  }
+  .joy-base{
+    position:relative; width:156px; height:156px; border-radius:50%;
+    background:radial-gradient(circle at 50% 50%, #18191b 0%, #101112 100%);
+    border:1px solid var(--border-focus);
+    box-shadow:inset 0 4px 14px rgba(0,0,0,0.65);
+    touch-action:none; user-select:none; -webkit-user-select:none; cursor:grab;
+  }
+  .joy-base:active{cursor:grabbing;}
+  .joy-base::before, .joy-base::after{
+    content:""; position:absolute; background:rgba(255,255,255,0.06); pointer-events:none;
+  }
+  .joy-base::before{left:50%; top:14px; bottom:14px; width:1px; transform:translateX(-50%);}
+  .joy-base::after{top:50%; left:14px; right:14px; height:1px; transform:translateY(-50%);}
+  .joy-ring{
+    position:absolute; inset:34px; border-radius:50%;
+    border:1px dashed rgba(255,255,255,0.08); pointer-events:none;
+  }
+  .joy-knob{
+    position:absolute; left:50%; top:50%; width:54px; height:54px;
+    margin-left:-27px; margin-top:-27px; border-radius:50%;
+    background:var(--gemini-gradient);
+    box-shadow:0 6px 18px rgba(255, 77, 77, 0.45), inset 0 2px 4px rgba(255,255,255,0.35);
+    pointer-events:none; transition:transform 0.06s ease-out;
+  }
+  .joy-knob.dragging{transition:none;}
+  .joy-readout{
+    font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    display:flex; gap:14px;
+  }
+  .joy-readout b{color:var(--text-secondary);}
+
+  .man-go{
+    width:100%; padding:11px; border-radius:100px; border:0; cursor:pointer;
+    background:var(--led-on); color:#00391c; font-family:var(--disp);
+    font-weight:700; font-size:12px; transition:0.15s;
+  }
+  .man-go:active{transform:scale(0.98);}
+  .man-hint{font-size:10px; color:var(--text-dim); text-align:center; line-height:1.35;}
+
+  @media(prefers-reduced-motion:reduce){ *{scroll-behavior:auto} }
+
+  /* ── correção de overflow: nada pode passar do painel ── */
+  html,body{overflow-x:hidden}
+  .unit{overflow:hidden}
+  .cols{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cols>*{min-width:0}
+  .mod{min-width:0; max-width:100%}
+  .gain{grid-template-columns:38px minmax(0,1fr) 60px}
+  .gain input{min-width:0; max-width:100%}
+  input[type=range]{width:100%; min-width:0}
+  .wave{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .gen-opt input.s{width:50px}
+  .reads{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .cell{min-width:0}
+  .cell .val{overflow:hidden; text-overflow:ellipsis}
+  @media(max-width:640px){ .cols{grid-template-columns:minmax(0,1fr)} .unit{padding:18px 14px 22px} }
+</style>
+</head>
+<body>
+
+<div class="page-container">
+  <!-- Imagem Esquerda -->
+  <img src="shadow.jpg" class="side-img" onerror="this.classList.add('broken')" alt="Imagem Esquerda">
+
+  <!-- Painel Central -->
+  <div class="unit">
+
+    <!-- Nameplate -->
+    <div class="plate">
+      <svg class="splane" width="36" height="36" viewBox="0 0 46 46" aria-hidden="true">
+        <rect x="1" y="1" width="44" height="44" rx="10" fill="none" stroke="url(#gemini-grad)" stroke-width="2"/>
+        <defs>
+          <linearGradient id="gemini-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ff6b5b" />
+            <stop offset="100%" stop-color="#c2185b" />
+          </linearGradient>
+        </defs>
+        <line x1="6" y1="23" x2="40" y2="23" stroke="var(--text-dim)" stroke-width="1"/>
+        <line x1="23" y1="6" x2="23" y2="40" stroke="var(--text-dim)" stroke-width="1"/>
+        <circle cx="32" cy="23" r="3" fill="none" stroke="#ff6b5b" stroke-width="1.5"/>
+      </svg>
+      <div class="id">
+        <div class="model">SHADOW</div>
+        <div class="desc">Controle de robô seguidor de linha</div>
+      </div>
+      <div class="conn">
+        <span class="led" id="dot"></span>
+        <button class="panel" id="conn"><span id="stxt">Conectar</span></button>
+      </div>
+    </div>
+
+    <div class="warn" id="warn">Bluetooth do navegador indisponível. Abra no <b>Chrome</b> ou <b>Edge</b>, e sirva a página por <b>https</b> (ou arquivo local no PC).</div>
+
+    <!-- Visor CRT -->
+    <div class="bezel">
+      <div class="crt">
+        <canvas id="grat"></canvas>
+        <canvas id="cv"></canvas>
+        <div class="vignette"></div>
+        <div class="osd ch1">e <b id="lgE">—</b></div>
+        <div class="osd ch2">u <b id="lgU">—</b></div>
+        <div class="osd scale" id="osdScale">±100</div>
+        <div class="osd tm" id="osdTime">00:00.00</div>
+        <div class="osd tb" id="osdHz">— Hz</div>
+        <div class="osd idle" id="osdIdle">SEM SINAL</div>
+      </div>
+    </div>
+
+    <!-- Leituras DMM -->
+    <div class="reads">
+      <div class="cell e"><div class="lab">Erro e</div><div class="val" id="vErr">—</div></div>
+      <div class="cell u"><div class="lab">Saída u</div><div class="val" id="vU">—</div></div>
+      <div class="cell"><div class="lab">PWM Esq</div><div class="val" id="vL">—</div></div>
+      <div class="cell"><div class="lab">PWM Dir</div><div class="val" id="vR">—</div></div>
+    </div>
+
+    <div class="groove"></div>
+
+    <div class="cols">
+      <!-- Perfis + Ganhos PID + Motores -->
+      <div>
+        <div class="sec-h"><b>Perfis de Controle</b><span>memória</span><div class="line"></div></div>
+        <div class="mod" style="margin-bottom:16px">
+          <div class="prof-grid" id="profGrid"></div>
+          <div class="prof-bar">
+            <div class="prof-info">
+              <input type="text" class="prof-title" id="profNameInput" maxlength="16" title="Clique para renomear o perfil">
+              <span class="prof-badge" id="profDirty">• editado</span>
+            </div>
+            <div class="prof-acts">
+              <button class="pact save" id="btnSaveProf" title="Salvar ajustes atuais neste perfil">Salvar</button>
+              <button class="pact" id="btnResetProf" title="Restaurar os 4 perfis padrão de fábrica">Padrões</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sec-h"><b>Compensador</b><span>C(s)</span><div class="line"></div></div>
+        <div class="mod">
+          <div class="formula">
+            <i>C(s)</i> = <i>K<sub>p</sub></i> + <i>K<sub>i</sub></i>
+            <span class="frac"><span>1</span><span class="d">s</span></span>
+            + <i>K<sub>d</sub></i>&#8201;<i>s</i>
+          </div>
+          <div id="tune"></div>
+        </div>
+
+        <div class="sec-h" style="margin-top:16px"><b>Motores</b><span>segurança</span><div class="line"></div></div>
+        <div class="mod">
+          <!-- Cronômetro de Volta -->
+          <div class="sw-box" id="swBox">
+            <div class="sw-meta">
+              <span class="sw-lab">Cronômetro</span>
+              <span class="sw-stat" id="swStat">AGUARDANDO</span>
+            </div>
+            <div class="sw-right">
+              <div class="sw-val" id="swVal">00:00.00</div>
+              <button class="sw-rst" id="swRst" title="Zerar cronômetro" onclick="resetStopwatch()">↺</button>
+            </div>
+          </div>
+
+          <div class="rocker">
+            <button id="bStop" class="on" onclick="disarmRobot()">Desarmado</button>
+            <button id="bGo" onclick="armRobot()">Armar</button>
+          </div>
+          <div class="mot-actions">
+            <button class="panel cal" onclick="calibrar(this)">Calibrar</button>
+            <button class="panel man-btn" id="bMan" onclick="toggleManual()" disabled>Modo Manual</button>
+          </div>
+          <div class="note" style="text-align:center; margin-top:10px;">Tecla <b style="color:var(--rec)">Esc</b> = parada de emergência</div>
+        </div>
+      </div>
+
+      <!-- Gerador de Sinal -->
+      <div>
+        <div class="sec-h"><b>Gerador de Sinal</b><span>system ID</span><div class="line"></div></div>
+        <div class="mod">
+          <div class="wave" id="exc">
+            <button class="excb on" data-t="-1">
+              <svg viewBox="0 0 26 13"><polyline points="1,7 25,7"/></svg>Off</button>
+            <button class="excb" data-t="0">
+              <svg viewBox="0 0 26 13"><polyline points="1,11 12,11 12,2 25,2"/></svg>Degrau</button>
+            <button class="excb" data-t="1">
+              <svg viewBox="0 0 26 13"><polyline points="1,11 1,2 8,2 8,11 15,11 15,2 22,2 22,11 25,11"/></svg>Quadr.</button>
+            <button class="excb" data-t="2">
+              <svg viewBox="0 0 26 13"><polyline points="1,2 4,2 4,11 9,11 9,2 13,2 13,11 17,11 17,2 21,2 21,11 25,11"/></svg>PRBS</button>
+          </div>
+          <div class="gen-opt" id="excopt">
+            <label>Amp <input class="s" id="eAmp" type="number" min="0" max="255" value="60"></label>
+            <label>Per&nbsp;ms <input class="s" id="ePer" type="number" min="20" max="5000" value="300"></label>
+            <label><input id="ePid" type="checkbox"> PID ligado</label>
+          </div>
+          <div class="durrow">
+            <span class="k">Janela</span>
+            <button class="durb" data-s="10">10s</button>
+            <button class="durb on" data-s="20">20s</button>
+            <button class="durb" data-s="30">30s</button>
+          </div>
+          <button id="rec" disabled>Capturar 20 s → CSV</button>
+          <div class="note" id="recmsg">Arme, ponha o robô na linha e capture. O CSV baixa ao terminar.</div>
+        </div>
+
+        <details>
+          <summary>Parâmetros avançados</summary>
+          <div class="mod" style="margin-top:8px"><div id="adv"></div>
+            <div class="chkrow"><input type="checkbox" id="inv"><span>Inverter leitura dos sensores</span></div>
+            <div class="chkrow"><input type="checkbox" id="swap"><span>Inverter motores (Esq/Dir)</span></div>
+            <div class="chkrow"><input type="checkbox" id="rev"><span>Permitir ré na roda interna (Curvas 90°)</span></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="foot" id="hz">Criado por: Luan de Paula Parreira · BLE · — Hz</div>
+  </div>
+
+  <!-- Imagem Direita -->
+  <img src="shadow.jpg" class="side-img" onerror="this.classList.add('broken')" alt="Imagem Direita">
+</div>
+
+<!-- Telinha Flutuante de Controle Manual (Joystick Analógico Touch + Controle PS5 DualSense + WASD) -->
+<div class="man-sheet" id="manSheet">
+  <div class="man-head">
+    <span class="man-title">Joystick</span>
+    <div class="man-badges">
+      <span class="man-pill ps5" id="ps5Badge">PS5 OK</span>
+      <span class="man-pill" id="manLineStatus">FORA DA LINHA</span>
+      <button class="man-close" onclick="toggleManual(false)" title="Fechar modo manual">✕</button>
+    </div>
+  </div>
+
+  <div class="man-spd">
+    <span>PWM MÁX</span>
+    <input type="range" id="slManSpd" min="40" max="255" step="5" value="105">
+    <b id="valManSpd">105</b>
+  </div>
+
+  <div class="joy-wrap">
+    <div class="joy-base" id="joyBase">
+      <div class="joy-ring"></div>
+      <div class="joy-knob" id="joyKnob"></div>
+    </div>
+    <div class="joy-readout">
+      <span>ESQ: <b id="joyOutL">0</b></span>
+      <span>DIR: <b id="joyOutR">0</b></span>
+    </div>
+  </div>
+
+  <button class="man-go" onclick="armRobot()">Armar na Linha (GO / ✕)</button>
+  <div class="man-hint">PS5: Analógico Esq ou R2/L2 + Esq · ✕ Arma · ○ Para · L1/R1 Vel.<br>Celular: arraste o analógico · PC: WASD / Setas</div>
+</div>
+
+<script>
+// ═══════════ parâmetros [chave, rótulo, min, max, passo] ═══════════
+const PIDS=[["kp","Kp",0,1000,1],["ki","Ki",0,10,0.01],["kd","Kd",0,1000,1],["spd","Base",0,255,1]];
+const ADV =[["ramp","RampMs",0,2000,25],["lost","LostMs",0,5000,10],["plot","PlotMs",10,200,1]];
+
+const elI={};
+function throttle(fn,ms){let t=0,la,h;return(...a)=>{la=a;const n=Date.now();if(n-t>=ms){t=n;fn(...a);}else{clearTimeout(h);h=setTimeout(()=>{t=Date.now();fn(...la);},ms-(n-t));}};}
+function fillRange(r){ const mn=+r.min,mx=+r.max; r.style.setProperty("--fill",((r.value-mn)/(mx-mn)*100)+"%"); }
+function buildRows(host,defs){
+  for(const [k,lab,mn,mx,st] of defs){
+    const row=document.createElement("div"); row.className="gain";
+    const sub=lab.replace(/^(K)([pid])$/,"$1<sub>$2</sub>");
+    const dec = st<1;
+    row.innerHTML=`<label>${sub}</label><input type="range" min="${mn}" max="${mx}" step="${st}"><input class="num" type="text" inputmode="${dec?'decimal':'numeric'}" autocomplete="off">`;
+    const [rng,num]=row.querySelectorAll("input"); elI[k]={range:rng,num:num};
+    const push=throttle(v=>cmd(k+"="+v),90);
+    rng.addEventListener("input",()=>{ num.value=rng.value; fillRange(rng); push(rng.value); checkProfileDirty(); });
+    num.addEventListener("input",()=>{
+      const raw=num.value.replace(",",".");
+      if(raw===""||raw==="."||raw==="-"||raw==="-.") return;
+      let v=parseFloat(raw); if(isNaN(v)) return;
+      v=Math.max(mn,Math.min(mx,v));
+      rng.value=v; fillRange(rng); push(v); checkProfileDirty();
+    });
+    host.appendChild(row); fillRange(rng);
+  }
+}
+buildRows(document.getElementById("tune"),PIDS);
+buildRows(document.getElementById("adv"),ADV);
+
+// Eventos dos checkboxes
+document.getElementById("inv").addEventListener("change",e=>{ cmd("inv="+(e.target.checked?1:0)); checkProfileDirty(); });
+document.getElementById("swap").addEventListener("change",e=>{ cmd("swap="+(e.target.checked?1:0)); checkProfileDirty(); });
+document.getElementById("rev").addEventListener("change",e=>{ cmd("rev="+(e.target.checked?1:0)); checkProfileDirty(); });
+
+// ═══════════ 4 Perfis de Controle (Persistência Local + Envio BLE) ═══════════
+const PROF_STORAGE_KEY = "shadow_pid_profiles_v1";
+const DEFAULT_PROFILES = [
+  { name: "Seguro",  kp: 35, ki: 0,    kd: 180, spd: 80,  ramp: 400, lost: 500, plot: 80, inv: 0, swap: 0, rev: 0 },
+  { name: "Misto",   kp: 50, ki: 0,    kd: 260, spd: 115, ramp: 400, lost: 500, plot: 80, inv: 0, swap: 0, rev: 0 },
+  { name: "Rápido",  kp: 65, ki: 0.05, kd: 340, spd: 150, ramp: 450, lost: 400, plot: 80, inv: 0, swap: 0, rev: 0 },
+  { name: "Ataque",  kp: 80, ki: 0.10, kd: 420, spd: 185, ramp: 500, lost: 350, plot: 80, inv: 0, swap: 0, rev: 0 }
+];
+
+let profiles = [];
+let activeProfIdx = 0;
+
+function loadProfilesFromStorage(){
+  try {
+    const raw = localStorage.getItem(PROF_STORAGE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed.profiles) && parsed.profiles.length === 4){
+        profiles = parsed.profiles;
+        activeProfIdx = Math.max(0, Math.min(3, parsed.active || 0));
+        return;
+      }
+    }
+  } catch(e){}
+  profiles = JSON.parse(JSON.stringify(DEFAULT_PROFILES));
+  activeProfIdx = 0;
+}
+
+function persistProfilesToStorage(){
+  try {
+    localStorage.setItem(PROF_STORAGE_KEY, JSON.stringify({
+      active: activeProfIdx,
+      profiles: profiles
+    }));
+  } catch(e){}
+}
+
+function getCurrentUIParams(){
+  return {
+    kp:   parseFloat(elI.kp.range.value),
+    ki:   parseFloat(elI.ki.range.value),
+    kd:   parseFloat(elI.kd.range.value),
+    spd:  parseFloat(elI.spd.range.value),
+    ramp: parseFloat(elI.ramp.range.value),
+    lost: parseFloat(elI.lost.range.value),
+    plot: parseFloat(elI.plot.range.value),
+    inv:  document.getElementById("inv").checked ? 1 : 0,
+    swap: document.getElementById("swap").checked ? 1 : 0,
+    rev:  document.getElementById("rev").checked ? 1 : 0
+  };
+}
+
+function applyParamsToUI(p, sendToRobot){
+  const numKeys = ["kp","ki","kd","spd","ramp","lost","plot"];
+  for(const k of numKeys){
+    if(elI[k] && p[k] !== undefined && !isNaN(p[k])){
+      elI[k].range.value = p[k];
+      elI[k].num.value = p[k];
+      fillRange(elI[k].range);
+      if(sendToRobot) cmd(k + "=" + p[k]);
+    }
+  }
+  if(p.inv !== undefined){
+    document.getElementById("inv").checked = (p.inv == 1);
+    if(sendToRobot) cmd("inv=" + (p.inv == 1 ? 1 : 0));
+  }
+  if(p.swap !== undefined){
+    document.getElementById("swap").checked = (p.swap == 1);
+    if(sendToRobot) cmd("swap=" + (p.swap == 1 ? 1 : 0));
+  }
+  if(p.rev !== undefined){
+    document.getElementById("rev").checked = (p.rev == 1);
+    if(sendToRobot) cmd("rev=" + (p.rev == 1 ? 1 : 0));
+  }
+}
+
+function renderProfileButtons(){
+  const grid = document.getElementById("profGrid");
+  grid.innerHTML = "";
+  profiles.forEach((p, idx) => {
+    const btn = document.createElement("button");
+    btn.className = "profb" + (idx === activeProfIdx ? " on" : "");
+    btn.innerHTML = `<span class="pnum">P${idx+1}</span><span class="pname">${p.name}</span>`;
+    btn.title = `Carregar P${idx+1} (${p.name}): Kp=${p.kp}, Ki=${p.ki}, Kd=${p.kd}, Base=${p.spd}`;
+    btn.addEventListener("click", () => selectProfile(idx, true));
+    grid.appendChild(btn);
+  });
+  document.getElementById("profNameInput").value = profiles[activeProfIdx].name;
+  checkProfileDirty();
+}
+
+function selectProfile(idx, sendToRobot){
+  activeProfIdx = idx;
+  const p = profiles[idx];
+  applyParamsToUI(p, sendToRobot);
+  persistProfilesToStorage();
+  renderProfileButtons();
+}
+
+function checkProfileDirty(){
+  const saved = profiles[activeProfIdx];
+  const cur = getCurrentUIParams();
+  const keys = ["kp","ki","kd","spd","ramp","lost","plot","inv","swap","rev"];
+  const dirty = keys.some(k => Math.abs((cur[k] || 0) - (saved[k] || 0)) > 1e-6);
+  document.getElementById("profDirty").classList.toggle("show", dirty);
+  document.getElementById("btnSaveProf").classList.toggle("dirty", dirty);
+}
+
+document.getElementById("profNameInput").addEventListener("input", e => {
+  const val = e.target.value.trim() || `Perfil ${activeProfIdx + 1}`;
+  profiles[activeProfIdx].name = val;
+  persistProfilesToStorage();
+  const btns = document.querySelectorAll("#profGrid .profb .pname");
+  if(btns[activeProfIdx]) btns[activeProfIdx].textContent = val;
+});
+
+document.getElementById("btnSaveProf").addEventListener("click", () => {
+  const cur = getCurrentUIParams();
+  const name = document.getElementById("profNameInput").value.trim() || `Perfil ${activeProfIdx + 1}`;
+  profiles[activeProfIdx] = { name, ...cur };
+  persistProfilesToStorage();
+  renderProfileButtons();
+  const btn = document.getElementById("btnSaveProf");
+  const orig = btn.textContent;
+  btn.textContent = "Salvo!";
+  setTimeout(() => { btn.textContent = orig; }, 900);
+});
+
+document.getElementById("btnResetProf").addEventListener("click", () => {
+  profiles = JSON.parse(JSON.stringify(DEFAULT_PROFILES));
+  persistProfilesToStorage();
+  selectProfile(activeProfIdx, true);
+});
+
+loadProfilesFromStorage();
+selectProfile(activeProfIdx, false);
+
+// ═══════════ Cronômetro Automático (Inicia ao Armar, Para ao Desarmar) ═══════════
+let isArmed = false;
+let swRunning = false;
+let swStart = 0;
+let swElapsed = 0;
+let swRaf = null;
+let ignoreOnUntil = 0;
+
+function formatStopwatch(ms){
+  const totalCs = Math.floor(Math.max(0, ms) / 10);
+  const cs = totalCs % 100;
+  const totalSec = Math.floor(totalCs / 100);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60);
+  return String(min).padStart(2, "0") + ":" +
+         String(sec).padStart(2, "0") + "." +
+         String(cs).padStart(2, "0");
+}
+
+function updateStopwatchUI(ms){
+  const str = formatStopwatch(ms);
+  document.getElementById("swVal").textContent = str;
+  document.getElementById("osdTime").textContent = str;
+}
+
+function tickStopwatch(){
+  if(!swRunning) return;
+  swElapsed = performance.now() - swStart;
+  updateStopwatchUI(swElapsed);
+  swRaf = requestAnimationFrame(tickStopwatch);
+}
+
+function startStopwatch(){
+  swStart = performance.now();
+  swElapsed = 0;
+  swRunning = true;
+  const box = document.getElementById("swBox");
+  box.classList.remove("stopped");
+  box.classList.add("running");
+  document.getElementById("swStat").textContent = "RODANDO";
+  document.getElementById("swRst").disabled = true;
+  cancelAnimationFrame(swRaf);
+  swRaf = requestAnimationFrame(tickStopwatch);
+}
+
+function stopStopwatch(){
+  if(!swRunning) return;
+  swElapsed = performance.now() - swStart;
+  swRunning = false;
+  cancelAnimationFrame(swRaf);
+  updateStopwatchUI(swElapsed);
+  const box = document.getElementById("swBox");
+  box.classList.remove("running");
+  box.classList.add("stopped");
+  document.getElementById("swStat").textContent = "TEMPO FINAL";
+  document.getElementById("swRst").disabled = false;
+}
+
+function resetStopwatch(){
+  if(swRunning) return;
+  swElapsed = 0;
+  updateStopwatchUI(0);
+  const box = document.getElementById("swBox");
+  box.classList.remove("running", "stopped");
+  document.getElementById("swStat").textContent = "AGUARDANDO";
+}
+
+// ═══════════ BLE (Nordic UART Service com Fila Sem Delay) ═══════════
+const NUS="6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const UUID_RX="6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const UUID_TX="6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+let device=null, rxChar=null, txChar=null, writing=false, wq=[];
+const enc=new TextEncoder(), dec=new TextDecoder();
+
+function cmd(c){
+  if(!rxChar) return;
+  // Substitui comandos antigos do joystick na fila para eliminar delay no celular
+  if(c.startsWith("joy=")){
+    const idx = wq.findIndex(item => item.raw.startsWith("joy="));
+    if(idx >= 0){
+      wq[idx] = { raw: c, buf: enc.encode(c + "\n") };
+      pump();
+      return;
+    }
+  }
+  wq.push({ raw: c, buf: enc.encode(c + "\n") });
+  if(wq.length > 24) wq.shift();
+  pump();
+}
+
+async function pump(){
+  if(writing || !wq.length || !rxChar) return;
+  writing = true;
+  const item = wq.shift();
+  try{
+    if(rxChar.writeValueWithoutResponse) await rxChar.writeValueWithoutResponse(item.buf);
+    else await rxChar.writeValue(item.buf);
+  }catch(e){}
+  writing = false;
+  if(wq.length) pump();
+}
+
+let rxbuf="";
+function onTx(ev){
+  rxbuf += dec.decode(ev.target.value);
+  let i;
+  while((i = rxbuf.indexOf("\n")) >= 0){
+    const l = rxbuf.slice(0,i);
+    rxbuf = rxbuf.slice(i+1);
+    parseLine(l.trim());
+  }
+}
+
+function parseLine(l){
+  if(l.startsWith("D:")){
+    const p = l.slice(2).split(",");
+    const t=+p[0], err=+p[1], u=+p[2], r=+p[3], esq=+p[4], dir=+p[5], on=+p[6], hz=+p[7];
+    vErr.textContent = err.toFixed(1);
+    vU.textContent   = u.toFixed(1);
+    vL.textContent   = esq;
+    vR.textContent   = dir;
+    document.getElementById("lgE").textContent = err.toFixed(1);
+    document.getElementById("lgU").textContent = u.toFixed(1);
+    document.getElementById("osdHz").textContent = (hz|0) + " Hz";
+    document.getElementById("hz").textContent = "SHADOW · BLE · " + (hz|0) + " Hz";
+
+    const armState = (on == 1);
+    if(!(armState && performance.now() < ignoreOnUntil)){
+      setArm(armState);
+    }
+    if(p.length >= 9){
+      const onLine = (+p[8] === 1);
+      const pill = document.getElementById("manLineStatus");
+      pill.textContent = onLine ? "NA LINHA" : "FORA DA LINHA";
+      pill.classList.toggle("on", onLine);
+    }
+    pushSample(err, u);
+    if(recording) recBuf.push([t,err,u,r,esq,dir,on,hz]);
+  } else if(l.startsWith("P:")){
+    const p = l.slice(2).split(",");
+    initVals({
+      kp:+p[0], ki:+p[1], kd:+p[2], spd:+p[3],
+      plot:+p[10], inv:+p[11],
+      ramp:(p.length >= 13 ? +p[12] : undefined)
+    });
+  }
+}
+
+function initVals(j){
+  const m = { kp:j.kp, ki:j.ki, kd:j.kd, spd:j.spd, ramp:j.ramp, plot:j.plot };
+  for(const k in m){
+    if(elI[k] && m[k] !== undefined && !isNaN(m[k])){
+      elI[k].range.value = m[k];
+      elI[k].num.value = m[k];
+      fillRange(elI[k].range);
+    }
+  }
+  if(!isNaN(j.inv)) document.getElementById("inv").checked = (j.inv == 1);
+  checkProfileDirty();
+}
+
+function showWarn(msg){
+  const w = document.getElementById("warn");
+  if(msg) w.innerHTML = msg;
+  w.style.display = "block";
+}
+
+async function connect(){
+  if(!navigator.bluetooth || !navigator.bluetooth.requestDevice){
+    showWarn("Bluetooth do navegador indisponível. Abra no <b>Chrome</b> ou <b>Edge</b> via <b>HTTPS</b>.");
+    return;
+  }
+  if(device && device.gatt && device.gatt.connected){ device.gatt.disconnect(); return; }
+  try{
+    document.getElementById("warn").style.display = "none";
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: "Shadow" }, { name: "PD_LineFollower" }],
+      optionalServices: [NUS]
+    });
+    device.addEventListener("gattserverdisconnected", onDisc);
+
+    let srv = null, svc = null;
+    for(let attempt = 1; attempt <= 3; attempt++){
+      try{
+        srv = await device.gatt.connect();
+        await new Promise(r => setTimeout(r, 350));
+        if(!srv.connected) throw new Error("GATT desconectou durante o handshake");
+        svc = await srv.getPrimaryService(NUS);
+        break;
+      }catch(err){
+        if(attempt === 3) throw err;
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+
+    txChar = await svc.getCharacteristic(UUID_TX);
+    rxChar = await svc.getCharacteristic(UUID_RX);
+    await txChar.startNotifications();
+    txChar.addEventListener("characteristicvaluechanged", onTx);
+    online(true);
+    cmd("params");
+  }catch(e){
+    online(false);
+    const msg = (e && e.message) ? e.message : String(e);
+    if(!(e && e.name === "NotFoundError" && /cancel/i.test(msg))){
+      showWarn("Não foi possível abrir o Bluetooth: <b>" + msg + "</b>.");
+    }
+  }
+}
+
+function onDisc(){
+  online(false);
+  setArm(false);
+  setManualUI(false);
+  rxChar=null; txChar=null; wq=[]; writing=false;
+}
+
+function online(ok){
+  document.getElementById("dot").className="led"+(ok?" on":"");
+  document.getElementById("stxt").textContent=ok?"Conectado":"Conectar";
+  document.getElementById("osdIdle").style.display=ok?"none":"block";
+  bGo.disabled=!ok; bStop.disabled=!ok; bMan.disabled=!ok; document.getElementById("rec").disabled=!ok;
+  if(!ok&&recording) stopRec(true);
+}
+document.getElementById("conn").addEventListener("click",connect);
+
+// ═══════════ arm / calibrar ═══════════
+const bGo=document.getElementById("bGo"), bStop=document.getElementById("bStop"), bMan=document.getElementById("bMan");
+function setArm(on){
+  if(on !== isArmed){
+    isArmed = on;
+    if(on) startStopwatch();
+    else stopStopwatch();
+  }
+  bGo.classList.toggle("on",on); bStop.classList.toggle("on",!on);
+  bGo.textContent=on?"Armado":"Armar"; bStop.textContent=on?"Desarmar":"Desarmado";
+}
+function armRobot(){
+  setManualUI(false);
+  ignoreOnUntil = 0;
+  cmd("go");
+}
+function disarmRobot(){
+  setManualUI(false);
+  ignoreOnUntil = performance.now() + 450;
+  cmd("stop");
+  setArm(false);
+}
+function calibrar(btn){ cmd("cal"); const o=btn.textContent; btn.disabled=true; let n=5; btn.textContent="Calibrando "+n+"s";
+  const id=setInterval(()=>{ n--; btn.textContent=n>0?"Calibrando "+n+"s":o; if(n<=0){clearInterval(id);btn.disabled=false;} },1000); }
+
+function estop(){
+  disarmRobot();
+  const b=document.getElementById("bStop");
+  b.animate([{boxShadow:"0 0 0 3px var(--rec)"},{boxShadow:"none"}],{duration:400});
+}
+
+// ═══════════ Joystick Analógico (Touch / Mouse) + Controle PS5 DualSense + Teclado ═══════════
+let manualMode = false;
+let joyLoopTimer = null;
+let stickX = 0; // -1..1 (esquerda..direita)
+let stickY = 0; // -1..1 (ré..frente)
+let touchDragging = false;
+let activePointerId = null;
+
+const slManSpd  = document.getElementById("slManSpd");
+const valManSpd = document.getElementById("valManSpd");
+const joyBase   = document.getElementById("joyBase");
+const joyKnob   = document.getElementById("joyKnob");
+const joyOutL   = document.getElementById("joyOutL");
+const joyOutR   = document.getElementById("joyOutR");
+
+slManSpd.addEventListener("input", () => {
+  valManSpd.textContent = slManSpd.value;
+  fillRange(slManSpd);
+});
+fillRange(slManSpd);
+
+function setManualUI(on){
+  manualMode = on;
+  resetJoystickVisuals();
+  bMan.classList.toggle("on", on);
+  document.getElementById("manSheet").classList.toggle("open", on);
+  if(on){
+    startJoyLoop();
+  } else {
+    stopJoyLoop();
+  }
+}
+
+function toggleManual(force){
+  const next = (typeof force === "boolean") ? force : !manualMode;
+  setManualUI(next);
+  cmd("man=" + (next ? 1 : 0));
+}
+
+function updateKnobVisual(nx, ny){
+  const maxOffset = 46; // raio máximo em px dentro de joyBase (156px)
+  const px = nx * maxOffset;
+  const py = -ny * maxOffset; // Y visual invertido (para cima é negativo)
+  joyKnob.style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0)`;
+}
+
+function computeDifferentialPWM(nx, ny){
+  const maxSpd = +slManSpd.value;
+  // Suaviza o eixo X para giros no próprio eixo mais controláveis
+  const steer = nx * 0.85;
+  const throttle = ny;
+
+  let rawL = throttle + steer;
+  let rawR = throttle - steer;
+  const peak = Math.max(1, Math.abs(rawL), Math.abs(rawR));
+  rawL /= peak;
+  rawR /= peak;
+
+  return [Math.round(rawL * maxSpd), Math.round(rawR * maxSpd)];
+}
+
+function resetJoystickVisuals(){
+  stickX = 0;
+  stickY = 0;
+  touchDragging = false;
+  activePointerId = null;
+  joyKnob.classList.remove("dragging");
+  updateKnobVisual(0, 0);
+  joyOutL.textContent = "0";
+  joyOutR.textContent = "0";
+}
+
+// ── Entrada Touch / Mouse no Analógico Virtual ──
+function handlePointerMove(clientX, clientY){
+  const rect = joyBase.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const maxR = rect.width * 0.34;
+
+  let dx = clientX - cx;
+  let dy = clientY - cy;
+  const dist = Math.hypot(dx, dy);
+  if(dist > maxR){
+    dx = (dx / dist) * maxR;
+    dy = (dy / dist) * maxR;
+  }
+
+  let nx = dx / maxR;
+  let ny = -dy / maxR;
+
+  // Zona morta central de 8%
+  if(Math.hypot(nx, ny) < 0.08){
+    nx = 0; ny = 0;
+  }
+
+  stickX = nx;
+  stickY = ny;
+  updateKnobVisual(nx, ny);
+}
+
+joyBase.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  if(!manualMode) toggleManual(true);
+  touchDragging = true;
+  activePointerId = e.pointerId;
+  joyBase.setPointerCapture(e.pointerId);
+  joyKnob.classList.add("dragging");
+  handlePointerMove(e.clientX, e.clientY);
+});
+
+joyBase.addEventListener("pointermove", e => {
+  if(!touchDragging || e.pointerId !== activePointerId) return;
+  e.preventDefault();
+  handlePointerMove(e.clientX, e.clientY);
+});
+
+function releasePointer(e){
+  if(!touchDragging || e.pointerId !== activePointerId) return;
+  resetJoystickVisuals();
+  if(manualMode) cmd("joy=0,0");
+}
+joyBase.addEventListener("pointerup", releasePointer);
+joyBase.addEventListener("pointercancel", releasePointer);
+
+// ── Entrada Teclado (WASD / Setas) ──
+const pressedKeys = new Set();
+const keyMap = {
+  KeyW:"F", ArrowUp:"F",
+  KeyS:"B", ArrowDown:"B",
+  KeyA:"L", ArrowLeft:"L",
+  KeyD:"R", ArrowRight:"R"
+};
+
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape"){
+    if(e.repeat) return;
+    e.preventDefault();
+    estop();
+    return;
+  }
+  if(!manualMode || e.target.tagName === "INPUT") return;
+  if(e.key === "Enter"){ e.preventDefault(); armRobot(); return; }
+  const dir = keyMap[e.code];
+  if(dir && !e.repeat){
+    e.preventDefault();
+    pressedKeys.add(dir);
+  }
+}, true);
+
+document.addEventListener("keyup", e => {
+  const dir = keyMap[e.code];
+  if(dir) pressedKeys.delete(dir);
+}, true);
+
+window.addEventListener("blur", () => {
+  pressedKeys.clear();
+  resetJoystickVisuals();
+  if(manualMode) cmd("joy=0,0");
+});
+
+// ── Suporte ao Controle PS5 (DualSense via Gamepad API) ──
+let ps5Index = null;
+let prevButtons = {};
+
+window.addEventListener("gamepadconnected", e => {
+  ps5Index = e.gamepad.index;
+  prevButtons = {};
+  const badge = document.getElementById("ps5Badge");
+  badge.classList.add("connected");
+  badge.textContent = /054c|dualsense|wireless controller/i.test(e.gamepad.id) ? "PS5 OK" : "GAMEPAD OK";
+});
+
+window.addEventListener("gamepaddisconnected", e => {
+  if(ps5Index === e.gamepad.index){
+    ps5Index = null;
+    document.getElementById("ps5Badge").classList.remove("connected");
+    if(manualMode) cmd("joy=0,0");
+  }
+});
+
+function applyDeadzone(v, dz = 0.12){
+  if(Math.abs(v) < dz) return 0;
+  return (v - Math.sign(v) * dz) / (1 - dz);
+}
+
+function readPS5Gamepad(){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = (ps5Index !== null && pads[ps5Index]) ? pads[ps5Index] : null;
+  if(!gp){
+    for(const p of pads){
+      if(p && p.connected){ gp = p; ps5Index = p.index; break; }
+    }
+  }
+  if(!gp) return null;
+
+  const badge = document.getElementById("ps5Badge");
+  if(!badge.classList.contains("connected")) badge.classList.add("connected");
+
+  const justPressed = (idx) => {
+    const down = !!(gp.buttons[idx] && gp.buttons[idx].pressed);
+    const wasDown = !!prevButtons[idx];
+    prevButtons[idx] = down;
+    return down && !wasDown;
+  };
+
+  // Botões de ação do PS5 DualSense:
+  // 0 = X (Cross) -> Armar na linha (GO)
+  // 1 = O (Circle) ou 9 = Options -> Parada de emergência (STOP)
+  // 3 = Triângulo -> Abrir/Fechar Modo Manual
+  // 4 = L1 / 5 = R1 -> Ajustar velocidade máxima manual
+  if(justPressed(0) && rxChar){ armRobot(); return null; }
+  if((justPressed(1) || justPressed(9)) && rxChar){ estop(); return null; }
+  if(justPressed(3) && rxChar){ toggleManual(); return null; }
+  if(justPressed(4)){
+    slManSpd.value = Math.max(40, +slManSpd.value - 10);
+    valManSpd.textContent = slManSpd.value; fillRange(slManSpd);
+  }
+  if(justPressed(5)){
+    slManSpd.value = Math.min(255, +slManSpd.value + 10);
+    valManSpd.textContent = slManSpd.value; fillRange(slManSpd);
+  }
+
+  // Eixos e Gatilhos do DualSense:
+  // axes[0] = Analógico Esquerdo X | axes[1] = Analógico Esquerdo Y
+  // buttons[7].value = R2 (acelerador) | buttons[6].value = L2 (ré)
+  // buttons[12..15] = Setas D-Pad
+  let gx = applyDeadzone(gp.axes[0] || 0);
+  let gy = -applyDeadzone(gp.axes[1] || 0);
+
+  const r2 = (gp.buttons[7] && gp.buttons[7].value) ? gp.buttons[7].value : 0;
+  const l2 = (gp.buttons[6] && gp.buttons[6].value) ? gp.buttons[6].value : 0;
+  const triggerThrottle = (r2 > 0.05 ? r2 : 0) - (l2 > 0.05 ? l2 : 0);
+  if(Math.abs(triggerThrottle) > Math.abs(gy)){
+    gy = triggerThrottle;
+  }
+
+  if(gp.buttons[12]?.pressed) gy = 1;
+  if(gp.buttons[13]?.pressed) gy = -1;
+  if(gp.buttons[14]?.pressed) gx = -1;
+  if(gp.buttons[15]?.pressed) gx = 1;
+
+  return { x: Math.max(-1, Math.min(1, gx)), y: Math.max(-1, Math.min(1, gy)) };
+}
+
+// Loop unificado de controle manual (110 ms -> seguro para BLE e abaixo do failsafe de 250 ms)
+let lastSentZero = true;
+function startJoyLoop(){
+  stopJoyLoop();
+  joyLoopTimer = setInterval(() => {
+    if(!manualMode) return;
+
+    let nx = 0, ny = 0;
+
+    // 1. Prioridade: Touch/Mouse no analógico virtual
+    if(touchDragging){
+      nx = stickX;
+      ny = stickY;
+    } else {
+      // 2. Teclado WASD / Setas
+      if(pressedKeys.has("F")) ny += 1;
+      if(pressedKeys.has("B")) ny -= 1;
+      if(pressedKeys.has("R")) nx += 1;
+      if(pressedKeys.has("L")) nx -= 1;
+
+      // 3. Controle PS5 DualSense
+      const ps5 = readPS5Gamepad();
+      if(ps5 && (Math.abs(ps5.x) > 0 || Math.abs(ps5.y) > 0)){
+        nx = ps5.x;
+        ny = ps5.y;
+      }
+
+      updateKnobVisual(nx, ny);
+    }
+
+    const [esq, dir] = computeDifferentialPWM(nx, ny);
+    joyOutL.textContent = esq;
+    joyOutR.textContent = dir;
+
+    if(esq === 0 && dir === 0){
+      if(!lastSentZero){
+        cmd("joy=0,0");
+        lastSentZero = true;
+      }
+    } else {
+      cmd(`joy=${esq},${dir}`);
+      lastSentZero = false;
+    }
+  }, 110);
+}
+
+function stopJoyLoop(){
+  clearInterval(joyLoopTimer);
+  joyLoopTimer = null;
+  lastSentZero = true;
+}
+
+// Polling leve em segundo plano para detectar botões do PS5 (ex: Triângulo para abrir modo manual)
+setInterval(() => {
+  if(!manualMode && rxChar){
+    readPS5Gamepad();
+  }
+}, 150);
+
+// ═══════════ captura → CSV + excitação ═══════════
+let recording=false, recBuf=[], recDur=20, recTick=null;
+let excType=-1, excAmp=60, excPer=300, excPid=false;
+function recLabel(){ document.getElementById("rec").textContent="Capturar "+recDur+" s"+(excType<0?"":" + excitar")+" → CSV"; }
+document.querySelectorAll(".durb").forEach(b=>b.addEventListener("click",()=>{ if(recording)return;
+  document.querySelectorAll(".durb").forEach(x=>x.classList.remove("on")); b.classList.add("on"); recDur=+b.dataset.s; recLabel(); }));
+document.querySelectorAll(".excb").forEach(b=>b.addEventListener("click",()=>{ if(recording)return;
+  document.querySelectorAll(".excb").forEach(x=>x.classList.remove("on")); b.classList.add("on"); excType=+b.dataset.t;
+  document.getElementById("excopt").style.display=excType<0?"none":"flex"; recLabel(); }));
+document.getElementById("eAmp").addEventListener("input",e=>excAmp=+e.target.value);
+document.getElementById("ePer").addEventListener("input",e=>excPer=+e.target.value);
+document.getElementById("ePid").addEventListener("change",e=>excPid=e.target.checked);
+const recBtn=document.getElementById("rec");
+recBtn.addEventListener("click",()=>{ recording?stopRec(true):startRec(); });
+function startRec(){ if(!rxChar) return;
+  if(excType>=0){ cmd("idtype="+excType); cmd("idamp="+excAmp); cmd("idper="+excPer); cmd("idpid="+(excPid?1:0)); cmd("id=1"); }
+  recBuf=[]; recording=true; recBtn.classList.add("armed"); document.getElementById("dot").classList.add("rec");
+  let left=recDur;
+  const tick=()=>{ recBtn.textContent="● Capturando "+left+"s · "+recBuf.length+" amostras";
+    document.getElementById("recmsg").textContent=excType>=0?("Excitando ("+["degrau","quadrada","PRBS"][excType]+") — toque pra parar."):"Coletando — toque pra parar."; };
+  tick(); recTick=setInterval(()=>{ left--; if(left<=0){stopRec(false);return;} tick(); },1000);
+}
+function stopRec(){ recording=false; clearInterval(recTick); recBtn.classList.remove("armed");
+  document.getElementById("dot").classList.remove("rec");
+  if(excType>=0) cmd("id=0"); recLabel();
+  if(recBuf.length<2){ document.getElementById("recmsg").textContent="Poucas amostras — conecte e arme antes."; return; }
+  exportCSV();
+  const dur=((recBuf[recBuf.length-1][0]-recBuf[0][0])/1000).toFixed(1);
+  document.getElementById("recmsg").textContent=recBuf.length+" amostras em "+dur+" s — CSV baixado.";
+}
+function exportCSV(){
+  const head="tempo_ms;erro;pid\n", t0=recBuf[0][0];
+  const dec=n=>String(n).replace(".",",");
+  const rows=recBuf.map(x=>[(x[0]-t0), dec(x[1]), dec(x[2])].join(";"));
+  const blob=new Blob([head+rows.join("\n")],{type:"text/csv;charset=utf-8"}), a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="LF1_"+new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")+".csv";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+// ═══════════ osciloscópio (Otimizado para Celular + PC) ═══════════
+const grat=document.getElementById("grat"), cv=document.getElementById("cv");
+const gctx=grat.getContext("2d"), tctx=cv.getContext("2d");
+let W=0,H=0, cur=0, dx=3, last={e:null,u:null}, um=40;
+const reduce=matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+function fit(){
+  const r = cv.getBoundingClientRect();
+  const d = 1; // Escala 1x evita sobrecarga de GPU e delay BLE no celular
+  W = r.width; H = r.height;
+  for(const c of [grat,cv]){
+    c.width = W * d; c.height = H * d;
+    c.getContext("2d").setTransform(d,0,0,d,0,0);
+  }
+  drawGrat(); cur = 0; last = {e:null,u:null};
+}
+addEventListener("resize",fit);
+
+const yE=()=>H*0.34, yU=()=>H*0.72;
+function drawGrat(){
+  gctx.clearRect(0,0,W,H);
+  gctx.strokeStyle="rgba(255,255,255,0.05)"; gctx.lineWidth=1;
+  gctx.beginPath();
+  for(let i=0;i<=10;i++){const x=W*i/10; gctx.moveTo(x,0); gctx.lineTo(x,H);}
+  for(let j=0;j<=8;j++){const y=H*j/8; gctx.moveTo(0,y); gctx.lineTo(W,y);}
+  gctx.stroke();
+  gctx.strokeStyle="rgba(255,255,255,0.1)"; gctx.beginPath();
+  gctx.moveTo(W/2,0); gctx.lineTo(W/2,H); gctx.moveTo(0,H/2); gctx.lineTo(W,H/2);
+  gctx.stroke();
+}
+
+let lastFade = 0;
+function fade(now){
+  if(!reduce && now - lastFade >= 33){
+    lastFade = now;
+    tctx.globalCompositeOperation="destination-out";
+    tctx.fillStyle="rgba(0,0,0,.06)";
+    tctx.fillRect(0,0,W,H);
+    tctx.globalCompositeOperation="source-over";
+  }
+  requestAnimationFrame(fade);
+}
+
+function pushSample(e,u){
+  um=Math.max(40, um*0.995, Math.abs(u));
+  document.getElementById("osdScale").textContent="e ±100 · u ±"+Math.round(um);
+  const ye=yE()-(Math.max(-100,Math.min(100,e))/100)*(H*0.30);
+  const yu=yU()-(Math.max(-um,Math.min(um,u))/um)*(H*0.24);
+  const x0=cur, x1=cur+dx;
+  if(reduce){ tctx.clearRect(x1,0,dx+2,H); }
+  tctx.lineWidth=2; tctx.lineCap="round";
+  
+  tctx.strokeStyle="#ff6b5b";
+  if(last.e!=null){ tctx.beginPath(); tctx.moveTo(x0,last.e); tctx.lineTo(x1,ye); tctx.stroke(); }
+  
+  tctx.strokeStyle="#ffb4a2";
+  if(last.u!=null){ tctx.beginPath(); tctx.moveTo(x0,last.u); tctx.lineTo(x1,yu); tctx.stroke(); }
+  
+  last.e=ye; last.u=yu; cur=x1;
+  if(cur>=W){ cur=0; last={e:null,u:null}; tctx.clearRect(0,0,6,H); }
+}
+
+window.addEventListener("load",()=>{ fit(); requestAnimationFrame(fade); });
+fit();
+if(!navigator.bluetooth) document.getElementById("warn").style.display="block";
+</script>
+</body>
+</html>
